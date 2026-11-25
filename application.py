@@ -9,6 +9,7 @@ import requests
 from dotenv import load_dotenv
 from geopy.exc import GeopyError
 from geopy.geocoders import Nominatim
+from PIL import Image, ImageTk
 from timezonefinder import TimezoneFinder
 
 root = Tk()
@@ -71,7 +72,6 @@ def getWeather():
             timeout=10,
         )
         json_data = response.json()
-        print(json_data)
 
     except (requests.RequestException, ValueError) as e:
         messagebox.showerror("Weather", f"Could not reach weather service:\n{e}")
@@ -97,6 +97,50 @@ def getWeather():
     humidity_value.config(text=f"{humidity}%")
     description_value.config(text=description)
     pressure_value.config(text=f"{pressure} hPa")
+
+    # Daily forecast - pick 12.00 PM entries
+    daily_data = []
+
+    for entry in json_data["list"]:
+        if "12:00:00" in entry["dt_txt"]:
+            daily_data.append(entry)
+
+    icons = []
+    temps = []
+
+    # Only for forward 4 days
+    for i in range(5):
+        if i >= len(daily_data):
+            break
+
+        icon_code = daily_data[i]["weather"][0]["icon"]
+        img = Image.open(f"icon/{icon_code}@2x.png").resize((50, 50))
+
+        icons.append(ImageTk.PhotoImage(img))
+        temps.append(
+            (daily_data[i]["main"]["temp_max"], daily_data[i]["main"]["feels_like"])
+        )
+
+    day_widget = [
+        (first_image, day_1, day_1_temp),
+        (second_image, day_2, day_2_temp),
+        (third_image, day_3, day_3_temp),
+        (fourth_image, day_4, day_4_temp),
+        (fifth_image, day_5, day_5_temp),
+    ]
+
+    for i, (img_label, day_label, temp_label) in enumerate(day_widget):
+        if i >= len(icons):
+            break
+
+        img_label.config(image=icons[i])
+        img_label.image = icons[i]
+
+        temp_label.config(text=f"Day: {temps[i][0]}\nNight: {temps[i][1]}")
+
+        # Use the forecast entry's own date, e.g. "2026-11-26 12:00:00"
+        entry_date = datetime.strptime(daily_data[i]["dt_txt"], "%Y-%m-%d %H:%M:%S")
+        day_label.config(text=entry_date.strftime("%A"))
 
 
 # icons
@@ -206,14 +250,14 @@ description_value.place(x=150, y=200)
 
 # Forecasting cells
 # First cell
-first_frame = Frame(root, width=230, height=132, bg="#eeefea")
+first_frame = Frame(root, width=230, height=132, bg="#323661")
 first_frame.place(x=35, y=315)
 
 first_image = Label(first_frame, bg="#323661")
 first_image.place(x=1, y=15)
 
 day_1 = Label(first_frame, font=("arial", 20), bg="#323661", fg="white")
-day_1.place(x=100, y=50)
+day_1.place(x=100, y=5)
 
 day_1_temp = Label(first_frame, font=("arial", 15, "bold"), bg="#323661", fg="white")
 day_1_temp.place(x=100, y=50)
