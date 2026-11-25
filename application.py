@@ -107,4 +107,70 @@ wind_speed_value.place(x=150, y=180)
 description_value = Label(root, font=("Helvetica", 9), bg="#333c4c", fg="white")
 description_value.place(x=150, y=200)
 
+# Forecasting cells
+# First cell
+first_frame = Frame(root, width=230, height=132, bg="#eeefea")
+first_frame.place(x=35, y=315)
+
+first_image = Label(first_frame, bg="#323661")
+first_image.place(x=1, y=15)
+
+day_1 = Label(first_frame, font=("arial", 20), bg="#323661", fg="white")
+day_1.place(x=100, y=50)
+
+day_1_temp = Label(first_frame, font=("arial", 15, "bold"), bg="#323661", fg="white")
+day_1_temp.place(x=100, y=50)
+
+# Second cell
+second_frame = Frame(root, width=70, height=115, bg="#eeefea")
+second_frame.place(x=305, y=325)
+
+second_image = Label(second_frame, bg="#eeefea")
+second_image.place(x=7, y=20)
+
+day_2 = Label(second_frame, bg="#eeefea", fg="#000000")
+day_2.place(x=10, y=5)
+
+day_2_temp = Label(second_frame, bg="#eeefea", fg="#000000")
+day_2_temp.place(x=2, y=70)
+
+# third cell
+third_frame = Frame(root, width=70, height=115, bg="#eeefea")
+third_frame.place(x=405, y=325)
+
+third_image = Label(third_frame, bg="#eeefea")
+third_image.place(x=7, y=20)
+
+day_3 = Label(third_frame, bg="#eeefea", fg="#000000")
+day_3.place(x=10, y=5)
+
+day_3_temp = Label(third_frame, bg="#eeefea", fg="#000000")
+day_3_temp.place(x=2, y=70)
+
+# fourth cell
+fourth_frame = Frame(root, width=70, height=115, bg="#eeefea")
+fourth_frame.place(x=505, y=325)
+
+fourth_image = Label(fourth_frame, bg="#eeefea")
+fourth_image.place(x=7, y=20)
+
+day_4 = Label(fourth_frame, bg="#eeefea", fg="#000000")
+day_4.place(x=10, y=5)
+
+day_4_temp = Label(fourth_frame, bg="#eeefea", fg="#000000")
+day_4_temp.place(x=2, y=70)
+
+# fifth cell
+fifth_frame = Frame(root, width=70, height=115, bg="#eeefea")
+fifth_frame.place(x=605, y=325)
+
+fifth_image = Label(fifth_frame, bg="#eeefea")
+fifth_image.place(x=7, y=20)
+
+day_5 = Label(fifth_frame, bg="#eeefea", fg="#000000")
+day_5.place(x=10, y=5)
+
+day_5_temp = Label(fifth_frame, bg="#eeefea", fg="#000000")
+day_5_temp.place(x=2, y=70)
+
 root.mainloop()
