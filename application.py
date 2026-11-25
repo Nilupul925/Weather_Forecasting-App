@@ -80,5 +80,31 @@ Label(frame_box, image=second_box, bg="#7094d4").place(x=400, y=30)
 Label(frame_box, image=second_box, bg="#7094d4").place(x=500, y=30)
 Label(frame_box, image=second_box, bg="#7094d4").place(x=600, y=30)
 
+# Clock
+clock = Label(root, font=("Helvetica", 20), bg="#202731", fg="white")
+clock.place(x=30, y=20)
+
+# Time-zone
+timezone = Label(root, font=("Helvetica", 20), bg="#202731", fg="white")
+timezone.place(x=500, y=20)
+
+long_lat = Label(root, font=("Helvetica", 10), bg="#202731", fg="white")
+long_lat.place(x=30, y=50)
+
+# Weather values
+temperature_value = Label(root, font=("Helvetica", 9), bg="#333c4c", fg="white")
+temperature_value.place(x=150, y=120)
+
+humidity_value = Label(root, font=("Helvetica", 9), bg="#333c4c", fg="white")
+humidity_value.place(x=150, y=140)
+
+pressure_value = Label(root, font=("Helvetica", 9), bg="#333c4c", fg="white")
+pressure_value.place(x=150, y=160)
+
+wind_speed_value = Label(root, font=("Helvetica", 9), bg="#333c4c", fg="white")
+wind_speed_value.place(x=150, y=180)
+
+description_value = Label(root, font=("Helvetica", 9), bg="#333c4c", fg="white")
+description_value.place(x=150, y=200)
 
 root.mainloop()
