@@ -1,11 +1,102 @@
+import os
 import tkinter as tk
+from datetime import datetime
 from tkinter import *
+from tkinter import messagebox
+
+import pytz
+import requests
+from dotenv import load_dotenv
+from geopy.exc import GeopyError
+from geopy.geocoders import Nominatim
+from timezonefinder import TimezoneFinder
 
 root = Tk()
 root.title("Weather Forecaster")
 root.geometry("750x470+300+200")
 root.resizable(False, False)
 root.config(bg="#202731")
+
+# API connect
+load_dotenv()
+api_key = os.getenv("API_key")
+
+
+# Weather processing function
+def getWeather():
+    city = textField.get().strip()
+    if not city:
+        messagebox.showwarning("Weather", "Please enter a location.")
+        return
+
+    try:
+        geoLocator = Nominatim(user_agent="weather-app-api")
+        location = geoLocator.geocode(city, timeout=10)
+    except GeopyError as e:
+        messagebox.showerror("Weather", f"Location service error:\n{e}")
+        return
+
+    if location is None:
+        messagebox.showerror("Weather", f"Location '{city}' not found.")
+        return
+
+    obj = TimezoneFinder()
+    result = obj.timezone_at(lng=location.longitude, lat=location.latitude)
+    timezone.config(text=result)
+
+    long_lat.config(
+        text=f"{round(location.latitude,4)}°N {round(location.longitude,4)}°E"
+    )
+
+    home = pytz.timezone(result)
+    local_time = datetime.now(home)
+    current_time = local_time.strftime("%I:%M %p")
+
+    clock.config(text=current_time)
+
+    # Weather details
+    if not api_key:
+        messagebox.showerror("Weather", "API_key is missing.")
+        return
+
+    try:
+        response = requests.get(
+            "https://api.openweathermap.org/data/2.5/weather",
+            params={
+                "lat": location.latitude,
+                "lon": location.longitude,
+                "appid": api_key,
+                "units": "metric",  # temperatures in °C, wind in m/s
+            },
+            timeout=10,
+        )
+        json_data = response.json()
+        print(json_data)
+
+    except (requests.RequestException, ValueError) as e:
+        messagebox.showerror("Weather", f"Could not reach weather service:\n{e}")
+        return
+
+    # On failure OpenWeather returns e.g. {"cod": 401, "message": "Invalid API key..."}
+    if response.status_code != 200:
+        messagebox.showerror(
+            "Weather",
+            f"Weather API error: {json_data.get('message', response.text)}",
+        )
+        return
+
+    description = json_data["weather"][0]["description"]
+    temp = round(json_data["main"]["temp"])
+    pressure = json_data["main"]["pressure"]
+    humidity = json_data["main"]["humidity"]
+    wind = json_data["wind"]["speed"]
+
+    temperature_value.config(text=f"{temp}°C")
+    wind_speed_value.config(text=f"{wind} m/s")
+    humidity_value.config(text=f"{humidity}%")
+    description_value.config(text=description)
+    pressure_value.config(text=f"{pressure} hPa")
+
 
 # icons
 application_icon = PhotoImage(file="Images/logo.png")
@@ -51,7 +142,12 @@ weat_icon.place(x=300, y=125)
 
 searchIcon = PhotoImage(file="Images/search_icon.png")
 search_icon = Button(
-    root, image=searchIcon, borderwidth=0, cursor="hand2", bg="#333c4c"
+    root,
+    image=searchIcon,
+    borderwidth=0,
+    cursor="hand2",
+    bg="#333c4c",
+    command=getWeather,
 )
 search_icon.place(x=645, y=135)
 
@@ -89,7 +185,7 @@ timezone = Label(root, font=("Helvetica", 20), bg="#202731", fg="white")
 timezone.place(x=500, y=20)
 
 long_lat = Label(root, font=("Helvetica", 10), bg="#202731", fg="white")
-long_lat.place(x=30, y=50)
+long_lat.place(x=500, y=50)
 
 # Weather values
 temperature_value = Label(root, font=("Helvetica", 9), bg="#333c4c", fg="white")

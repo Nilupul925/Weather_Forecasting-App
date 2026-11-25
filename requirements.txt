@@ -1,0 +1,15 @@
+﻿certifi==2026.11.20
+cffi==2.1.1
+charset-normalizer==3.5.3
+flatbuffers==25.12.19
+geographiclib==2.1
+geopy==2.5.0
+idna==3.20
+numpy==2.5.5
+pycparser==3.12
+python-dotenv==1.2.4
+pytz==2026.6
+requests==2.34.2
+timezonefinder==9.2.0
+timezonefinder-data==4.2026.6
+urllib3==2.8.0
