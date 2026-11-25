@@ -61,7 +61,7 @@ def getWeather():
 
     try:
         response = requests.get(
-            "https://api.openweathermap.org/data/2.5/weather",
+            "https://api.openweathermap.org/data/2.5/forecast",
             params={
                 "lat": location.latitude,
                 "lon": location.longitude,
@@ -85,11 +85,12 @@ def getWeather():
         )
         return
 
-    description = json_data["weather"][0]["description"]
-    temp = round(json_data["main"]["temp"])
-    pressure = json_data["main"]["pressure"]
-    humidity = json_data["main"]["humidity"]
-    wind = json_data["wind"]["speed"]
+    current = json_data["list"][0]
+    description = current["weather"][0]["description"]
+    temp = round(current["main"]["temp"])
+    pressure = current["main"]["pressure"]
+    humidity = current["main"]["humidity"]
+    wind = current["wind"]["speed"]
 
     temperature_value.config(text=f"{temp}°C")
     wind_speed_value.config(text=f"{wind} m/s")
