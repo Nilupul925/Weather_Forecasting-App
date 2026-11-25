@@ -1,5 +1,6 @@
 import os
 import tkinter as tk
+from collections import OrderedDict
 from datetime import datetime
 from tkinter import *
 from tkinter import messagebox
@@ -9,54 +10,119 @@ import requests
 from dotenv import load_dotenv
 from geopy.exc import GeopyError
 from geopy.geocoders import Nominatim
-from PIL import Image, ImageTk
+from PIL import Image, ImageEnhance, ImageTk
 from timezonefinder import TimezoneFinder
+
+# Colour palette
+BG_DARK = "#202731"  # window background
+SEARCH_BG = "#333c4c"  # search bar
+MINT = "#aad1c8"  # current weather box
+NAVY = "#323661"  # first forecast card / caption text
+CARD = "#EEEFEA"  # small forecast cards
+BLUE = "#7094d4"  # bottom strip / accent
+MUTED = "#8a93a6"  # hints & placeholder
+ERROR = "#ff8a80"
+
+# Loading status
+PLACEHOLDER = "Search city..."
+DEFAULT_HINT = "Type a city and press Enter or click the search button"
 
 root = Tk()
 root.title("Weather Forecaster")
 root.geometry("750x470+300+200")
 root.resizable(False, False)
-root.config(bg="#202731")
+root.config(bg=BG_DARK)
 
 # API connect
 load_dotenv()
 api_key = os.getenv("API_key")
 
+current_tz = None  # timezone of the searched city (if none then computer's time)
+status_text = DEFAULT_HINT  # message the status line returns to after hovering
+status_color = MUTED
+card_info = [""] * 5  # hover details for each forecast card
+
+
+# Live clock
+def refresh_clock():
+    now = datetime.now(current_tz) if current_tz else datetime.now()
+    clock.config(text=now.strftime("%I:%M %p"))
+    date_label.config(text=now.strftime("%A, %d %B"))
+
+
+def tick():
+    refresh_clock()
+    root.after(1000, tick)
+
+
+# Status line under the search bar
+def set_status(text, color=MUTED):
+    global status_text, status_color
+    status_text, status_color = text, color
+    status.config(text=text, fg=color)
+
+
+# Search box placeholder
+def clear_placeholder(event=None):
+    if textField.cget("fg") == MUTED:
+        textField.delete(0, END)
+        textField.config(fg="white")
+
+
+def show_placeholder(event=None):
+    if not textField.get():
+        textField.insert(0, PLACEHOLDER)
+        textField.config(fg=MUTED)
+
 
 # Weather processing function
-def getWeather():
-    city = textField.get().strip()
+def getWeather(event=None):
+    city = "" if textField.cget("fg") == MUTED else textField.get().strip()
     if not city:
         messagebox.showwarning("Weather", "Please enter a location.")
         return
+
+    set_status(f"Searching for '{city}'...")
+    root.config(cursor="watch")
+    root.update_idletasks()
+    try:
+        loadWeather(city)
+    finally:
+        root.config(cursor="")
+
+
+def loadWeather(city):
+    global current_tz
 
     try:
         geoLocator = Nominatim(user_agent="weather-app-api")
         location = geoLocator.geocode(city, timeout=10)
     except GeopyError as e:
+        set_status("Location service error", ERROR)
         messagebox.showerror("Weather", f"Location service error:\n{e}")
         return
 
     if location is None:
+        set_status(f"Location '{city}' not found", ERROR)
         messagebox.showerror("Weather", f"Location '{city}' not found.")
         return
 
     obj = TimezoneFinder()
-    result = obj.timezone_at(lng=location.longitude, lat=location.latitude)
-    timezone.config(text=result)
+    result = obj.timezone_at(lng=location.longitude, lat=location.latitude) or "UTC"
+    timezone.config(text=result.replace("_", " "))
 
+    lat, lon = location.latitude, location.longitude
     long_lat.config(
-        text=f"{round(location.latitude,4)}°N {round(location.longitude,4)}°E"
+        text=f"{abs(lat):.4f}°{'N' if lat >= 0 else 'S'}  "
+        f"{abs(lon):.4f}°{'E' if lon >= 0 else 'W'}"
     )
 
-    home = pytz.timezone(result)
-    local_time = datetime.now(home)
-    current_time = local_time.strftime("%I:%M %p")
-
-    clock.config(text=current_time)
+    current_tz = pytz.timezone(result)
+    refresh_clock()
 
     # Weather details
     if not api_key:
+        set_status("API_key is missing in .env", ERROR)
         messagebox.showerror("Weather", "API_key is missing.")
         return
 
@@ -64,8 +130,8 @@ def getWeather():
         response = requests.get(
             "https://api.openweathermap.org/data/2.5/forecast",
             params={
-                "lat": location.latitude,
-                "lon": location.longitude,
+                "lat": lat,
+                "lon": lon,
                 "appid": api_key,
                 "units": "metric",  # temperatures in °C, wind in m/s
             },
@@ -74,18 +140,21 @@ def getWeather():
         json_data = response.json()
 
     except (requests.RequestException, ValueError) as e:
+        set_status("Could not reach weather service", ERROR)
         messagebox.showerror("Weather", f"Could not reach weather service:\n{e}")
         return
 
     # On failure OpenWeather returns e.g. {"cod": 401, "message": "Invalid API key..."}
     if response.status_code != 200:
+        set_status("Weather API error", ERROR)
         messagebox.showerror(
             "Weather",
             f"Weather API error: {json_data.get('message', response.text)}",
         )
         return
 
-    current = json_data["list"][0]
+    forecasts = json_data["list"]
+    current = forecasts[0]
     description = current["weather"][0]["description"]
     temp = round(current["main"]["temp"])
     pressure = current["main"]["pressure"]
@@ -95,52 +164,67 @@ def getWeather():
     temperature_value.config(text=f"{temp}°C")
     wind_speed_value.config(text=f"{wind} m/s")
     humidity_value.config(text=f"{humidity}%")
-    description_value.config(text=description)
+    description_value.config(text=description.capitalize())
     pressure_value.config(text=f"{pressure} hPa")
 
-    # Daily forecast - pick 12.00 PM entries
-    daily_data = []
+    # Daily forecast - group the 3-hourly entries by the city's local date
+    offset = json_data.get("city", {}).get("timezone", 0)
+    days = OrderedDict()
+    for entry in forecasts:
+        local = datetime.fromtimestamp(entry["dt"] + offset, tz=pytz.utc)
+        days.setdefault(local.date(), []).append((local, entry))
 
-    for entry in json_data["list"]:
-        if "12:00:00" in entry["dt_txt"]:
-            daily_data.append(entry)
+    for i, (date, entries) in enumerate(list(days.items())[:5]):
+        img_label, day_label, temp_label = day_widget[i]
 
-    icons = []
-    temps = []
+        # Today -> current conditions, other days -> forecast closest to midday
+        if i == 0:
+            rep = current
+        else:
+            rep = min(entries, key=lambda e: abs(e[0].hour - 12))[1]
 
-    # Only for forward 4 days
-    for i in range(5):
-        if i >= len(daily_data):
-            break
+        high = round(max(e["main"]["temp_max"] for _, e in entries))
+        low = round(min(e["main"]["temp_min"] for _, e in entries))
 
-        icon_code = daily_data[i]["weather"][0]["icon"]
-        img = Image.open(f"icon/{icon_code}@2x.png").resize((50, 50))
+        size = 80 if i == 0 else 50
+        icon_code = rep["weather"][0]["icon"]
+        img = Image.open(f"icon/{icon_code}@2x.png").resize((size, size), Image.LANCZOS)
+        photo = ImageTk.PhotoImage(img)
+        img_label.config(image=photo)
+        img_label.image = photo
 
-        icons.append(ImageTk.PhotoImage(img))
-        temps.append(
-            (daily_data[i]["main"]["temp_max"], daily_data[i]["main"]["feels_like"])
+        weekday = date.strftime("%A")
+        day_label.config(text=weekday)
+        unit = "°C" if i == 0 else "°"
+        temp_label.config(text=f"Day: {high}{unit}\nNight: {low}{unit}")
+
+        card_info[i] = (
+            f"{weekday}: {rep['weather'][0]['description'].capitalize()}  •  "
+            f"{low}°C - {high}°C  •  Humidity {rep['main']['humidity']}%"
         )
 
-    day_widget = [
-        (first_image, day_1, day_1_temp),
-        (second_image, day_2, day_2_temp),
-        (third_image, day_3, day_3_temp),
-        (fourth_image, day_4, day_4_temp),
-        (fifth_image, day_5, day_5_temp),
-    ]
+    parts = location.address.split(", ")
+    place = parts[0] if len(parts) == 1 else f"{parts[0]}, {parts[-1]}"
+    set_status(f"Showing weather for {place}  •  hover a day for details", "white")
 
-    for i, (img_label, day_label, temp_label) in enumerate(day_widget):
-        if i >= len(icons):
-            break
 
-        img_label.config(image=icons[i])
-        img_label.image = icons[i]
+# Forecast card hover effect
+def bind_card_hover(index, widgets, title_label, normal_fg, hover_fg):
+    def on_enter(event):
+        title_label.config(fg=hover_fg)
+        if card_info[index]:
+            status.config(text=card_info[index], fg=MINT)
 
-        temp_label.config(text=f"Day: {temps[i][0]}\nNight: {temps[i][1]}")
+    def on_leave(event):
+        under_pointer = root.winfo_containing(*root.winfo_pointerxy())
+        if under_pointer in widgets:
+            return  # moved between widgets of the same card
+        title_label.config(fg=normal_fg)
+        status.config(text=status_text, fg=status_color)
 
-        # Use the forecast entry's own date, e.g. "2026-11-26 12:00:00"
-        entry_date = datetime.strptime(daily_data[i]["dt_txt"], "%Y-%m-%d %H:%M:%S")
-        day_label.config(text=entry_date.strftime("%A"))
+    for w in widgets:
+        w.bind("<Enter>", on_enter)
+        w.bind("<Leave>", on_leave)
 
 
 # icons
@@ -148,170 +232,196 @@ application_icon = PhotoImage(file="Images/logo.png")
 root.iconphoto(False, application_icon)
 
 round_box = PhotoImage(file="Images/Rounded Rectangle 1.png")
-Label(root, image=round_box, bg="#202731").place(x=30, y=60)
+Label(root, image=round_box, bg=BG_DARK).place(x=30, y=60)
 
-# Details labels
-temperature = Label(
-    root, text="Temperature", font=("Helvetica", 11), fg="#323661", bg="#aad1c8"
-)
-temperature.place(x=40, y=120)
+# Details labels (rows aligned inside the mint box)
+ROWS = [127, 147, 167, 187, 207]
 
-humidity = Label(
-    root, text="Humidity", font=("Helvetica", 11), fg="#323661", bg="#aad1c8"
-)
-humidity.place(x=40, y=140)
+temperature = Label(root, text="Temperature", font=("Helvetica", 11), fg=NAVY, bg=MINT)
+temperature.place(x=38, y=ROWS[0], anchor="w")
 
-pressure = Label(
-    root, text="Pressure", font=("Helvetica", 11), fg="#323661", bg="#aad1c8"
-)
-pressure.place(x=40, y=160)
+humidity = Label(root, text="Humidity", font=("Helvetica", 11), fg=NAVY, bg=MINT)
+humidity.place(x=38, y=ROWS[1], anchor="w")
 
-wind = Label(
-    root, text="Wind Speed", font=("Helvetica", 11), fg="#323661", bg="#aad1c8"
-)
-wind.place(x=40, y=180)
+pressure = Label(root, text="Pressure", font=("Helvetica", 11), fg=NAVY, bg=MINT)
+pressure.place(x=38, y=ROWS[2], anchor="w")
 
-description = Label(
-    root, text="Description", font=("Helvetica", 11), fg="#323661", bg="#aad1c8"
-)
-description.place(x=40, y=200)
+wind = Label(root, text="Wind Speed", font=("Helvetica", 11), fg=NAVY, bg=MINT)
+wind.place(x=38, y=ROWS[3], anchor="w")
+
+description = Label(root, text="Description", font=("Helvetica", 11), fg=NAVY, bg=MINT)
+description.place(x=38, y=ROWS[4], anchor="w")
 
 # Search box
 searchBox = PhotoImage(file="Images/Rounded Rectangle 3.png")
-search_box = Label(root, image=searchBox, bg="#202731")
+search_box = Label(root, image=searchBox, bg=BG_DARK)
 search_box.place(x=270, y=122)
 
 weatIcon = PhotoImage(file="Images/Layer 7.png")
-weat_icon = Label(root, image=weatIcon, bg="#333c4c")
-weat_icon.place(x=300, y=125)
+weat_icon = Label(root, image=weatIcon, bg=SEARCH_BG)
+weat_icon.place(x=300, y=152, anchor="w")
 
 searchIcon = PhotoImage(file="Images/search_icon.png")
+
+# Brighter copy of the search icon for the hover effect
+_search_img = Image.open("Images/search_icon.png").convert("RGBA")
+_r, _g, _b, _a = _search_img.split()
+_bright = ImageEnhance.Brightness(Image.merge("RGB", (_r, _g, _b))).enhance(1.3)
+searchIconHover = ImageTk.PhotoImage(Image.merge("RGBA", (*_bright.split(), _a)))
+
 search_icon = Button(
     root,
     image=searchIcon,
     borderwidth=0,
+    relief=FLAT,
+    highlightthickness=0,
     cursor="hand2",
-    bg="#333c4c",
+    bg=SEARCH_BG,
+    activebackground=SEARCH_BG,
     command=getWeather,
 )
-search_icon.place(x=645, y=135)
+search_icon.place(x=700, y=152, anchor="e")
+search_icon.bind("<Enter>", lambda e: search_icon.config(image=searchIconHover))
+search_icon.bind("<Leave>", lambda e: search_icon.config(image=searchIcon))
 
 textField = tk.Entry(
     root,
     justify="center",
-    width=15,
-    font=("poppins", 25, "bold"),
-    bg="#333c4c",
+    font=("poppins", 20, "bold"),
+    bg=SEARCH_BG,
     border=0,
     fg="white",
+    insertbackground="white",
+    selectbackground=BLUE,
+    highlightthickness=0,
 )
-textField.place(x=370, y=130)
+textField.place(x=362, y=152, width=286, height=40, anchor="w")
+textField.bind("<FocusIn>", clear_placeholder)
+textField.bind("<FocusOut>", show_placeholder)
+textField.bind("<Return>", getWeather)
+show_placeholder()
+
+# Status / hint line under the search bar
+status = Label(root, text=DEFAULT_HINT, font=("Helvetica", 9), bg=BG_DARK, fg=MUTED)
+status.place(x=497, y=205, anchor="n")
 
 # Details box
-frame_box = Frame(root, width=900, height=180, bg="#7094d4")
+frame_box = Frame(root, width=750, height=180, bg=BLUE)
 frame_box.pack(side="bottom")
 
 first_box = PhotoImage(file="Images/Rounded Rectangle 2.png")
 second_box = PhotoImage(file="Images/Rounded Rectangle 2 copy.png")
 
-Label(frame_box, image=first_box, bg="#7094d4").place(x=30, y=20)
+# Cards evenly spaced with a 30px margin on both sides
+CARD_X = [302, 415, 529, 643]
 
-Label(frame_box, image=second_box, bg="#7094d4").place(x=300, y=30)
-Label(frame_box, image=second_box, bg="#7094d4").place(x=400, y=30)
-Label(frame_box, image=second_box, bg="#7094d4").place(x=500, y=30)
-Label(frame_box, image=second_box, bg="#7094d4").place(x=600, y=30)
+first_bg = Label(frame_box, image=first_box, bg=BLUE)
+first_bg.place(x=30, y=21)
+
+card_bgs = []
+for x in CARD_X:
+    bg_label = Label(frame_box, image=second_box, bg=BLUE)
+    bg_label.place(x=x, y=30)
+    card_bgs.append(bg_label)
 
 # Clock
-clock = Label(root, font=("Helvetica", 20), bg="#202731", fg="white")
+clock = Label(root, font=("Helvetica", 20), bg=BG_DARK, fg="white")
 clock.place(x=30, y=20)
 
-# Time-zone
-timezone = Label(root, font=("Helvetica", 20), bg="#202731", fg="white")
-timezone.place(x=500, y=20)
+date_label = Label(root, font=("Helvetica", 10), bg=BG_DARK, fg=MUTED)
+date_label.place(x=33, y=51)
 
-long_lat = Label(root, font=("Helvetica", 10), bg="#202731", fg="white")
-long_lat.place(x=500, y=50)
+# Time-zone
+timezone = Label(root, font=("Helvetica", 20), bg=BG_DARK, fg="white")
+timezone.place(x=720, y=20, anchor="ne")
+
+long_lat = Label(root, font=("Helvetica", 10), bg=BG_DARK, fg=MUTED)
+long_lat.place(x=720, y=55, anchor="ne")
 
 # Weather values
-temperature_value = Label(root, font=("Helvetica", 9), bg="#333c4c", fg="white")
-temperature_value.place(x=150, y=120)
+VALUE_FONT = ("Helvetica", 10, "bold")
 
-humidity_value = Label(root, font=("Helvetica", 9), bg="#333c4c", fg="white")
-humidity_value.place(x=150, y=140)
+temperature_value = Label(root, text="--", font=VALUE_FONT, bg=MINT, fg=BG_DARK)
+temperature_value.place(x=128, y=ROWS[0], anchor="w")
 
-pressure_value = Label(root, font=("Helvetica", 9), bg="#333c4c", fg="white")
-pressure_value.place(x=150, y=160)
+humidity_value = Label(root, text="--", font=VALUE_FONT, bg=MINT, fg=BG_DARK)
+humidity_value.place(x=128, y=ROWS[1], anchor="w")
 
-wind_speed_value = Label(root, font=("Helvetica", 9), bg="#333c4c", fg="white")
-wind_speed_value.place(x=150, y=180)
+pressure_value = Label(root, text="--", font=VALUE_FONT, bg=MINT, fg=BG_DARK)
+pressure_value.place(x=128, y=ROWS[2], anchor="w")
 
-description_value = Label(root, font=("Helvetica", 9), bg="#333c4c", fg="white")
-description_value.place(x=150, y=200)
+wind_speed_value = Label(root, text="--", font=VALUE_FONT, bg=MINT, fg=BG_DARK)
+wind_speed_value.place(x=128, y=ROWS[3], anchor="w")
+
+description_value = Label(
+    root,
+    text="--",
+    font=("Helvetica", 9, "bold"),
+    bg=MINT,
+    fg=BG_DARK,
+    wraplength=84,
+    justify="left",
+)
+description_value.place(x=128, y=ROWS[4] - 8, anchor="nw")
 
 # Forecasting cells
 # First cell
-first_frame = Frame(root, width=230, height=132, bg="#323661")
-first_frame.place(x=35, y=315)
+first_frame = Frame(root, width=226, height=127, bg=NAVY)
+first_frame.place(x=35, y=316)
 
-first_image = Label(first_frame, bg="#323661")
-first_image.place(x=1, y=15)
+first_image = Label(first_frame, bg=NAVY)
+first_image.place(x=6, rely=0.5, anchor="w")
 
-day_1 = Label(first_frame, font=("arial", 20), bg="#323661", fg="white")
-day_1.place(x=100, y=5)
+day_1 = Label(first_frame, font=("arial", 18), bg=NAVY, fg="white")
+day_1.place(x=158, y=12, anchor="n")
 
-day_1_temp = Label(first_frame, font=("arial", 15, "bold"), bg="#323661", fg="white")
-day_1_temp.place(x=100, y=50)
+day_1_temp = Label(
+    first_frame, font=("arial", 13, "bold"), bg=NAVY, fg="white", justify="center"
+)
+day_1_temp.place(x=158, y=56, anchor="n")
 
-# Second cell
-second_frame = Frame(root, width=70, height=115, bg="#eeefea")
-second_frame.place(x=305, y=325)
 
-second_image = Label(second_frame, bg="#eeefea")
-second_image.place(x=7, y=20)
+# Small cells (second to fifth)
+def make_small_card(x):
+    frame = Frame(root, width=67, height=111, bg=CARD)
+    frame.place(x=x + 5, y=325)
 
-day_2 = Label(second_frame, bg="#eeefea", fg="#000000")
-day_2.place(x=10, y=5)
+    image = Label(frame, bg=CARD)
+    image.place(relx=0.5, y=24, anchor="n")
 
-day_2_temp = Label(second_frame, bg="#eeefea", fg="#000000")
-day_2_temp.place(x=2, y=70)
+    day = Label(frame, font=("Segoe UI", 9, "bold"), bg=CARD, fg=NAVY)
+    day.place(relx=0.5, y=3, anchor="n")
 
-# third cell
-third_frame = Frame(root, width=70, height=115, bg="#eeefea")
-third_frame.place(x=405, y=325)
+    temp = Label(frame, font=("Segoe UI", 8), bg=CARD, fg="#000000", justify="center")
+    temp.place(relx=0.5, y=76, anchor="n")
+    return frame, image, day, temp
 
-third_image = Label(third_frame, bg="#eeefea")
-third_image.place(x=7, y=20)
 
-day_3 = Label(third_frame, bg="#eeefea", fg="#000000")
-day_3.place(x=10, y=5)
+second_frame, second_image, day_2, day_2_temp = make_small_card(CARD_X[0])
+third_frame, third_image, day_3, day_3_temp = make_small_card(CARD_X[1])
+fourth_frame, fourth_image, day_4, day_4_temp = make_small_card(CARD_X[2])
+fifth_frame, fifth_image, day_5, day_5_temp = make_small_card(CARD_X[3])
 
-day_3_temp = Label(third_frame, bg="#eeefea", fg="#000000")
-day_3_temp.place(x=2, y=70)
+day_widget = [
+    (first_image, day_1, day_1_temp),
+    (second_image, day_2, day_2_temp),
+    (third_image, day_3, day_3_temp),
+    (fourth_image, day_4, day_4_temp),
+    (fifth_image, day_5, day_5_temp),
+]
 
-# fourth cell
-fourth_frame = Frame(root, width=70, height=115, bg="#eeefea")
-fourth_frame.place(x=505, y=325)
+# Hover effects for the forecast cards
+bind_card_hover(
+    0, [first_bg, first_frame, first_image, day_1, day_1_temp], day_1, "white", MINT
+)
+small_cards = [
+    (second_frame, second_image, day_2, day_2_temp),
+    (third_frame, third_image, day_3, day_3_temp),
+    (fourth_frame, fourth_image, day_4, day_4_temp),
+    (fifth_frame, fifth_image, day_5, day_5_temp),
+]
+for i, (frame, image, day, temp) in enumerate(small_cards, start=1):
+    bind_card_hover(i, [card_bgs[i - 1], frame, image, day, temp], day, NAVY, BLUE)
 
-fourth_image = Label(fourth_frame, bg="#eeefea")
-fourth_image.place(x=7, y=20)
-
-day_4 = Label(fourth_frame, bg="#eeefea", fg="#000000")
-day_4.place(x=10, y=5)
-
-day_4_temp = Label(fourth_frame, bg="#eeefea", fg="#000000")
-day_4_temp.place(x=2, y=70)
-
-# fifth cell
-fifth_frame = Frame(root, width=70, height=115, bg="#eeefea")
-fifth_frame.place(x=605, y=325)
-
-fifth_image = Label(fifth_frame, bg="#eeefea")
-fifth_image.place(x=7, y=20)
-
-day_5 = Label(fifth_frame, bg="#eeefea", fg="#000000")
-day_5.place(x=10, y=5)
-
-day_5_temp = Label(fifth_frame, bg="#eeefea", fg="#000000")
-day_5_temp.place(x=2, y=70)
-
+tick()
 root.mainloop()
