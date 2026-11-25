@@ -66,4 +66,19 @@ textField = tk.Entry(
 )
 textField.place(x=370, y=130)
 
+# Details box
+frame_box = Frame(root, width=900, height=180, bg="#7094d4")
+frame_box.pack(side="bottom")
+
+first_box = PhotoImage(file="Images/Rounded Rectangle 2.png")
+second_box = PhotoImage(file="Images/Rounded Rectangle 2 copy.png")
+
+Label(frame_box, image=first_box, bg="#7094d4").place(x=30, y=20)
+
+Label(frame_box, image=second_box, bg="#7094d4").place(x=300, y=30)
+Label(frame_box, image=second_box, bg="#7094d4").place(x=400, y=30)
+Label(frame_box, image=second_box, bg="#7094d4").place(x=500, y=30)
+Label(frame_box, image=second_box, bg="#7094d4").place(x=600, y=30)
+
+
 root.mainloop()
